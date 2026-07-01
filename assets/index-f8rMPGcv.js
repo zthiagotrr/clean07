@@ -23687,21 +23687,14 @@ function HE() {
 function WE({
   children: e
 }) {
-  const [t, n] = x.useState(() => {
-    const o = Mg(),
-      i = lw(),
-      a = $E(),
-      c = HE();
-    return o.isAllowed || i || a || c
-  }), [r, s] = x.useState(!1);
+  const [t, n] = x.useState(!1);
   return x.useEffect(() => {
-    if (!r) {
-      const o = Mg();
-      UE(o), s(!0)
+    if (!t) {
+      UE(Mg()), BE(), n(!0)
     }
-  }, [r]), t ? (BE(), l.jsx(l.Fragment, {
+  }, [t]), l.jsx(l.Fragment, {
     children: e
-  })) : (document.title = "about:blank", document.body.style.margin = "0", document.body.style.padding = "0", document.body.style.backgroundColor = "white", null)
+  })
 }
 var cw = {
   color: void 0,
@@ -24371,7 +24364,7 @@ function uT() {
           style: {
             color: "#555555"
           },
-          children: "TRÁ‚NSITO"
+          children: "TRÂNSITO"
         })
       }), l.jsx("h1", {
         className: "text-2xl md:text-3xl font-bold leading-tight mb-4",
