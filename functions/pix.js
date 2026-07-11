@@ -1,7 +1,8 @@
 const { getSupabase } = require("./lib/supabase");
 
-const PLAY_BASE    = "https://app.playpayments.com.br/api";
-const PLAY_API_KEY = process.env.PLAYPAYMENTS_SECRET_KEY;
+const POSEIDON_BASE   = "https://app.poseidonpay.site/api/v1";
+const POSEIDON_PUB    = process.env.POSEIDON_PUBLIC_KEY;
+const POSEIDON_SEC    = process.env.POSEIDON_SECRET_KEY;
 
 function jsonResponse(statusCode, body) {
   return {
@@ -20,7 +21,6 @@ function normalizeAmount(rawAmount) {
   if (rawAmount == null) return 81.70;
   const n = Number(rawAmount);
   if (!Number.isFinite(n)) return 81.70;
-  // se vier em centavos (> 100), converte para reais
   if (Number.isInteger(n) && n >= 100) return n / 100;
   return n;
 }
@@ -35,6 +35,16 @@ function gerarCpfValido() {
   let r2 = (s2 * 10) % 11; if (r2 >= 10) r2 = 0;
   d.push(r2);
   return d.join('');
+}
+
+function formatCpf(cpf) {
+  return cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+}
+
+function getDueDate() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().split("T")[0];
 }
 
 async function postWithRetry(url, payload, headers) {
@@ -82,40 +92,38 @@ exports.handler = async (event) => {
   } catch { body = {}; }
 
   const randDigits = (len) => Array.from({ length: len }, () => Math.floor(Math.random() * 10)).join("");
-  const randId = randDigits(6);
+  const randId = randDigits(8);
 
   const rawAmount = body.amount ?? body.valor ?? body.total ?? 8170;
   const amount    = normalizeAmount(rawAmount);
 
   const customerName  = (body.nome || body.name || body.customer_name || `Cliente ${randId}`).toString().trim();
   const customerEmail = (body.email || body.customer_email || `cliente${randId}@gmail.com`).toString().trim();
+  const customerPhone = (body.phone || body.customer_phone || "(11) 99999-9999").toString();
   const cpfRaw        = (body.cpf || body.document || body.customer_cpf || "").toString().replace(/\D/g, "");
   const customerCpf   = cpfRaw.length === 11 ? cpfRaw : gerarCpfValido();
 
   const payload = {
+    identifier: `order_${randId}_${Date.now()}`,
     amount,
-    customer: {
+    client: {
       name:     customerName,
       email:    customerEmail,
-      document: customerCpf,
+      phone:    customerPhone,
+      document: formatCpf(customerCpf),
     },
-    external_id: `order_${randId}_${Date.now()}`,
-    expires_in:  3600,
+    dueDate: getDueDate(),
   };
 
   const headers = {
     "Content-Type":  "application/json",
-    "Authorization": `Bearer ${PLAY_API_KEY}`,
-    "User-Agent":    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    "Accept":        "application/json, text/plain, */*",
-    "Accept-Language": "pt-BR,pt;q=0.9",
-    "Origin":        "https://app.playpayments.com.br",
-    "Referer":       "https://app.playpayments.com.br/",
+    "x-public-key":  POSEIDON_PUB,
+    "x-secret-key":  POSEIDON_SEC,
   };
 
   let resp;
   try {
-    resp = await postWithRetry(`${PLAY_BASE}/pix`, payload, headers);
+    resp = await postWithRetry(`${POSEIDON_BASE}/gateway/pix/receive`, payload, headers);
   } catch (err) {
     return jsonResponse(502, { success: false, error: "Falha ao conectar com gateway: " + String(err) });
   }
@@ -123,7 +131,7 @@ exports.handler = async (event) => {
   const text = await resp.text();
   if (!resp.ok) {
     let errMsg = text;
-    try { errMsg = JSON.parse(text)?.message || text; } catch {}
+    try { errMsg = JSON.parse(text)?.message || errMsg; } catch {}
     return jsonResponse(resp.status, { success: false, error: errMsg, raw: text });
   }
 
@@ -132,9 +140,9 @@ exports.handler = async (event) => {
     return jsonResponse(500, { success: false, error: "Resposta inválida da gateway", raw: text });
   }
 
-  // PlayPayments retorna: transaction_id, pix_code, qr_code, pix.code
-  const transactionId = parsed.transaction_id || null;
-  const pixCode       = parsed.pix_code || parsed.pix?.code || parsed.qr_code || null;
+  // PoseidonPay retorna: transactionId, status, pix.code, pix.base64
+  const transactionId = parsed.transactionId || null;
+  const pixCode       = parsed.pix?.code || null;
 
   try {
     const supabase = getSupabase();
